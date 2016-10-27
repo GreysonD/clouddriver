@@ -24,6 +24,7 @@ import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergrou
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.ServerGroupParameters
 import com.netflix.spinnaker.clouddriver.openstack.deploy.exception.OpenstackOperationException
 import com.netflix.spinnaker.clouddriver.openstack.deploy.exception.OpenstackProviderException
+import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.OpenstackUserDataProvider
 import com.netflix.spinnaker.clouddriver.openstack.security.OpenstackCredentials
 import com.netflix.spinnaker.clouddriver.openstack.security.OpenstackNamedAccountCredentials
 import org.openstack4j.model.heat.Stack
@@ -92,6 +93,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
   def "should deploy a heat stack"() {
     given:
     @Subject def operation = new DeployOpenstackAtomicOperation(description)
+    operation.setUserDataProvider(new OpenstackUserDataProvider())
     String createdStackName = 'app-stack-details-v000'
 
     when:
@@ -109,6 +111,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
   def "should deploy a heat stack even when stack exists"() {
     given:
     @Subject def operation = new DeployOpenstackAtomicOperation(description)
+    operation.setUserDataProvider(new OpenstackUserDataProvider())
     Stack stack = Mock(Stack)
     String createdStackName = 'app-stack-details-v000'
     stack.name >> { createdStackName }
@@ -141,6 +144,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     }
     println scaledDescription.toString()
     @Subject def operation = new DeployOpenstackAtomicOperation(scaledDescription)
+    operation.setUserDataProvider(new OpenstackUserDataProvider())
     String createdStackName = 'app-stack-details-v000'
 
     when:
@@ -158,6 +162,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
   def "should not deploy a stack when exception thrown"() {
     given:
     @Subject def operation = new DeployOpenstackAtomicOperation(description)
+    operation.setUserDataProvider(new OpenstackUserDataProvider())
     String createdStackName = 'app-stack-details-v000'
     Throwable throwable = new OpenstackProviderException('foo')
 

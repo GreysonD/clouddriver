@@ -23,14 +23,17 @@ import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergrou
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.MemberData
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.UserDataType
 import com.netflix.spinnaker.clouddriver.openstack.deploy.exception.OpenstackOperationException
+import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.OpenstackUserDataProvider
 import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.StackPoolMemberAware
 import com.netflix.spinnaker.clouddriver.openstack.domain.LoadBalancerResolver
+import com.netflix.spinnaker.clouddriver.openstack.security.OpenstackNamedAccountCredentials
 import com.netflix.spinnaker.clouddriver.openstack.task.TaskStatusAware
 import com.netflix.spinnaker.clouddriver.orchestration.AtomicOperation
 import com.netflix.spinnaker.clouddriver.orchestration.AtomicOperations
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.IOUtils
 import org.openstack4j.model.network.Subnet
+import org.springframework.beans.factory.annotation.Autowired
 
 import java.util.concurrent.ConcurrentHashMap
 
@@ -50,6 +53,9 @@ import java.util.concurrent.ConcurrentHashMap
 class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation<DeploymentResult>, StackPoolMemberAware, LoadBalancerResolver {
 
   private final String BASE_PHASE = "DEPLOY"
+
+  @Autowired
+  OpenstackUserDataProvider userDataProvider
 
   DeployOpenstackAtomicOperationDescription description
 
@@ -163,21 +169,7 @@ class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation
       Subnet subnet = provider.getSubnet(description.region, subnetId)
       task.updateStatus BASE_PHASE, "Found network id $subnet.networkId from subnet $subnetId."
 
-      String userData = ""
-      if (description.userDataType && description.userData) {
-        if (UserDataType.fromString(description.userDataType) == UserDataType.URL) {
-          task.updateStatus BASE_PHASE, "Resolving user data from url $description.userData..."
-          userData = description.userData.toURL()?.text
-        } else if (UserDataType.fromString(description.userDataType) == UserDataType.SWIFT) {
-          String[] parts = description.userData.split(":")
-          if (parts?.length == 2) {
-            userData = provider.readSwiftObject(description.region, parts[0], parts[1])
-          }
-        } else {
-          userData = description.userData
-        }
-        task.updateStatus BASE_PHASE, "Resolved user data."
-      }
+      String userData = getUserData(provider, stackName)
 
       task.updateStatus BASE_PHASE, "Creating heat stack $stackName..."
       provider.deploy(description.region, stackName, template, subtemplates, description.serverGroupParameters.identity {
@@ -200,6 +192,33 @@ class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation
     deploymentResult
   }
 
+  String getUserData(OpenstackClientProvider provider, String serverGroupName) {
+    String customUserData = ''
+    if (description.userDataType && description.userData) {
+      if (UserDataType.fromString(description.userDataType) == UserDataType.URL) {
+        task.updateStatus BASE_PHASE, "Resolving user data from url $description.userData..."
+        customUserData = description.userData.toURL()?.text
+      } else if (UserDataType.fromString(description.userDataType) == UserDataType.SWIFT) {
+        String[] parts = description.userData.split(":")
+        if (parts?.length == 2) {
+          customUserData = provider.readSwiftObject(description.region, parts[0], parts[1])
+        }
+      } else {
+        customUserData = description.userData
+      }
+      task.updateStatus BASE_PHASE, "Resolved user data."
+    }
+
+    OpenstackNamedAccountCredentials credentials = description.credentials.credentials
+    String commonUserData = userDataProvider.getUserData(credentials, serverGroupName, description.region)
+    String userData = [commonUserData, customUserData].join('\n')
+    if (userData && userData.startsWith("\n")) {
+      userData = userData.substring(1)
+    }
+
+    userData
+  }
+
   /**
    * Return the file contents of a template, either from the account config location or from the classpath.
    * @param filename
@@ -218,5 +237,4 @@ class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation
       template ?: ""
     }
   }
-
 }
