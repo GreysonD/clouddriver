@@ -19,6 +19,7 @@ package com.netflix.spinnaker.clouddriver.openstack.deploy.ops
 import com.netflix.frigga.Names
 import com.netflix.spinnaker.clouddriver.openstack.security.OpenstackNamedAccountCredentials
 import com.netflix.spinnaker.clouddriver.security.AccountCredentials
+import groovy.util.logging.Slf4j
 
 // TODO (jshimek) Refactor the LocalFileUserDataProvider the AWS driver uses to be more driver agnostic
 // See https://github.com/spinnaker/spinnaker/issues/1274
@@ -28,18 +29,29 @@ import com.netflix.spinnaker.clouddriver.security.AccountCredentials
  * Any custom user data specified for each deployment will be appended to common user data, allowing custom user data
  * to override the common.
  */
+@Slf4j
 public class OpenstackUserDataProvider {
+
+  final OpenstackNamedAccountCredentials credentials
+
+  OpenstackUserDataProvider(OpenstackNamedAccountCredentials credentials) {
+    this.credentials = credentials
+  }
 
   /**
    * Returns the custom user data or the empty string if non is found.
    */
-  String getUserData(final OpenstackNamedAccountCredentials credentials,
-                            final String serverGroupName,
-                            final String region) {
+  String getUserData(final String serverGroupName, final String region, final String customUserData) {
 
     String userDataFile = credentials.getUserDataFile()
     String rawUserData = getFileContents(userDataFile)
-    String userData = replaceUserDataTokens(rawUserData, credentials, serverGroupName, region)
+    String commonUserData = replaceUserDataTokens(rawUserData, credentials, serverGroupName, region)
+
+    String userData = [commonUserData, customUserData].join('\n')
+    if (userData && userData.startsWith("\n")) {
+      userData = userData.substring(1)
+    }
+
     userData
   }
 
@@ -48,7 +60,6 @@ public class OpenstackUserDataProvider {
    */
   String getFileContents(String filename) {
 
-    // TODO (jshimek) should we cache this?
     if (!filename) {
       return ''
     }
@@ -60,8 +71,8 @@ public class OpenstackUserDataProvider {
         contents = contents + '\n'
       }
       return contents
-    } catch (IOException ignore) {
-      // Normal case happens if hte requested file is not found
+    } catch (IOException e) {
+      log.warn("Failed to read user data file ${filename}; ${e.message}")
       return ''
     }
   }

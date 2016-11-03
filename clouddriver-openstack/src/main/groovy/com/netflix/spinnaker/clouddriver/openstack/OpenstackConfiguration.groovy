@@ -17,7 +17,6 @@
 package com.netflix.spinnaker.clouddriver.openstack
 
 import com.netflix.spinnaker.clouddriver.openstack.config.OpenstackConfigurationProperties
-import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.OpenstackUserDataProvider
 import com.netflix.spinnaker.clouddriver.openstack.health.OpenstackHealthIndicator
 import com.netflix.spinnaker.clouddriver.openstack.security.OpenstackCredentialsInitializer
 import org.springframework.beans.factory.config.ConfigurableBeanFactory
@@ -49,10 +48,5 @@ class OpenstackConfiguration {
   @Bean
   OpenstackHealthIndicator openstackHealthIndicator() {
     new OpenstackHealthIndicator()
-  }
-
-  @Bean
-  OpenstackUserDataProvider userDataProvider() {
-    new OpenstackUserDataProvider()
   }
 }

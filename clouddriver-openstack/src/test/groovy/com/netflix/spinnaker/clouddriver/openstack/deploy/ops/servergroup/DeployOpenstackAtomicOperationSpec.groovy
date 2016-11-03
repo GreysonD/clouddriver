@@ -22,6 +22,7 @@ import com.netflix.spinnaker.clouddriver.openstack.client.OpenstackClientProvide
 import com.netflix.spinnaker.clouddriver.openstack.client.OpenstackProviderFactory
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.DeployOpenstackAtomicOperationDescription
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.ServerGroupParameters
+import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.UserDataType
 import com.netflix.spinnaker.clouddriver.openstack.deploy.exception.OpenstackOperationException
 import com.netflix.spinnaker.clouddriver.openstack.deploy.exception.OpenstackProviderException
 import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.OpenstackUserDataProvider
@@ -57,6 +58,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
 
   def credentials
   def serverGroupParams
+  def expectedServerGroupParams
   def description
   def provider
   def mockLb
@@ -76,7 +78,16 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     OpenstackProviderFactory.createProvider(creds) >> { provider }
     credentials = new OpenstackCredentials(creds)
     serverGroupParams = new ServerGroupParameters(instanceType: instanceType, image:image, maxSize: maxSize, minSize: minSize, subnetId: subnetId, loadBalancers: [lbId], securityGroups: securityGroups)
-    description = new DeployOpenstackAtomicOperationDescription(stack: stack, application: application, freeFormDetails: details, region: region, serverGroupParameters: serverGroupParams, timeoutMins: timeoutMins, disableRollback: disableRollback, account: accountName, credentials: credentials)
+    description = new DeployOpenstackAtomicOperationDescription(stack: stack, application: application, freeFormDetails: details, region: region, serverGroupParameters: serverGroupParams.clone(), timeoutMins: timeoutMins, disableRollback: disableRollback, account: accountName, credentials: credentials)
+
+    // Add the computed parts to the server group params
+    expectedServerGroupParams = serverGroupParams.clone()
+    expectedServerGroupParams.with {
+      it.resourceFilename = 'servergroup_resource.yaml'
+      it.networkId = '1234'
+      it.rawUserData = ''
+    }
+
     mockItem = Mock(ListItem)
     mockItem.id >> { listenerId }
     mockLb = Mock(LoadBalancerV2)
@@ -93,7 +104,6 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
   def "should deploy a heat stack"() {
     given:
     @Subject def operation = new DeployOpenstackAtomicOperation(description)
-    operation.setUserDataProvider(new OpenstackUserDataProvider())
     String createdStackName = 'app-stack-details-v000'
 
     when:
@@ -104,14 +114,13 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     1 * provider.getLoadBalancer(region, lbId) >> mockLb
     1 * provider.getListener(region, listenerId) >> mockListener
     1 * provider.getSubnet(region, subnetId) >> mockSubnet
-    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, serverGroupParams, _ as Boolean, _ as Long, tags)
+    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, expectedServerGroupParams, _ as Boolean, _ as Long, tags)
     noExceptionThrown()
   }
 
   def "should deploy a heat stack even when stack exists"() {
     given:
     @Subject def operation = new DeployOpenstackAtomicOperation(description)
-    operation.setUserDataProvider(new OpenstackUserDataProvider())
     Stack stack = Mock(Stack)
     String createdStackName = 'app-stack-details-v000'
     stack.name >> { createdStackName }
@@ -126,7 +135,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     1 * provider.getLoadBalancer(region, lbId) >> mockLb
     1 * provider.getListener(region, listenerId) >> mockListener
     1 * provider.getSubnet(region, subnetId) >> mockSubnet
-    1 * provider.deploy(region, newStackName, _ as String, _ as Map<String,String>, serverGroupParams, _ as Boolean, _ as Long, tags)
+    1 * provider.deploy(region, newStackName, _ as String, _ as Map<String,String>, expectedServerGroupParams, _ as Boolean, _ as Long, tags)
     noExceptionThrown()
   }
 
@@ -134,17 +143,24 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     given:
     def scaledServerGroupParams = serverGroupParams.clone()
     scaledServerGroupParams.with {
-      autoscalingType = ServerGroupParameters.AutoscalingType.CPU
-      scaleup = new ServerGroupParameters.Scaler(cooldown: 60, adjustment: 1, period: 60, threshold: 50)
-      scaledown = new ServerGroupParameters.Scaler(cooldown: 60, adjustment: -1, period: 600, threshold: 15)
+      it.autoscalingType = ServerGroupParameters.AutoscalingType.CPU
+      it.scaleup = new ServerGroupParameters.Scaler(cooldown: 60, adjustment: 1, period: 60, threshold: 50)
+      it.scaledown = new ServerGroupParameters.Scaler(cooldown: 60, adjustment: -1, period: 600, threshold: 15)
     }
+
     def scaledDescription = description.clone()
     scaledDescription.with {
-      serverGroupParameters = scaledServerGroupParams
+      it.serverGroupParameters = scaledServerGroupParams.clone()
     }
-    println scaledDescription.toString()
+
+    def expected = expectedServerGroupParams.clone()
+    expected.with {
+      it.autoscalingType = ServerGroupParameters.AutoscalingType.CPU
+      it.scaleup = new ServerGroupParameters.Scaler(cooldown: 60, adjustment: 1, period: 60, threshold: 50)
+      it.scaledown = new ServerGroupParameters.Scaler(cooldown: 60, adjustment: -1, period: 600, threshold: 15)
+    }
+
     @Subject def operation = new DeployOpenstackAtomicOperation(scaledDescription)
-    operation.setUserDataProvider(new OpenstackUserDataProvider())
     String createdStackName = 'app-stack-details-v000'
 
     when:
@@ -155,14 +171,42 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     1 * provider.getLoadBalancer(region, lbId) >> mockLb
     1 * provider.getListener(region, listenerId) >> mockListener
     1 * provider.getSubnet(region, subnetId) >> mockSubnet
-    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, scaledServerGroupParams, _ as Boolean, _ as Long, tags)
+    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, expected, _ as Boolean, _ as Long, tags)
+    noExceptionThrown()
+  }
+
+  def "ensure user data is resolved correctly"() {
+    def userData = '#!/bin/bash\necho "userdata" >> /etc/userdata'
+    def expected = expectedServerGroupParams.clone()
+    expected.with {
+      it.rawUserData = userData
+      it.sourceUserDataType = UserDataType.TEXT.toString()
+      it.sourceUserData = userData
+    }
+
+    def userDataDescription = description.clone()
+    userDataDescription.with {
+      it.userData = userData
+      it.userDataType = UserDataType.TEXT
+    }
+    @Subject def operation = new DeployOpenstackAtomicOperation(userDataDescription)
+    String createdStackName = 'app-stack-details-v000'
+
+    when:
+    operation.operate([])
+
+    then:
+    1 * provider.listStacks(region) >> []
+    1 * provider.getLoadBalancer(region, lbId) >> mockLb
+    1 * provider.getListener(region, listenerId) >> mockListener
+    1 * provider.getSubnet(region, subnetId) >> mockSubnet
+    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, expected, _ as Boolean, _ as Long, tags)
     noExceptionThrown()
   }
 
   def "should not deploy a stack when exception thrown"() {
     given:
     @Subject def operation = new DeployOpenstackAtomicOperation(description)
-    operation.setUserDataProvider(new OpenstackUserDataProvider())
     String createdStackName = 'app-stack-details-v000'
     Throwable throwable = new OpenstackProviderException('foo')
 
@@ -174,7 +218,7 @@ class DeployOpenstackAtomicOperationSpec extends Specification {
     1 * provider.getLoadBalancer(region, lbId) >> mockLb
     1 * provider.getListener(region, listenerId) >> mockListener
     1 * provider.getSubnet(region, subnetId) >> mockSubnet
-    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, serverGroupParams, _ as Boolean, _ as Long, tags) >> { throw throwable }
+    1 * provider.deploy(region, createdStackName, _ as String, _ as Map<String,String>, expectedServerGroupParams, _ as Boolean, _ as Long, tags) >> { throw throwable }
     Throwable actual = thrown(OpenstackOperationException)
     actual.cause == throwable
   }

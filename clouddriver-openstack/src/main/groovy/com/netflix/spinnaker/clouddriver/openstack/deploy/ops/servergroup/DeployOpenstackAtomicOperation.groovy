@@ -21,19 +21,17 @@ import com.netflix.spinnaker.clouddriver.openstack.client.OpenstackClientProvide
 import com.netflix.spinnaker.clouddriver.openstack.deploy.OpenstackServerGroupNameResolver
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.DeployOpenstackAtomicOperationDescription
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.MemberData
+import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.ServerGroupParameters
 import com.netflix.spinnaker.clouddriver.openstack.deploy.description.servergroup.UserDataType
 import com.netflix.spinnaker.clouddriver.openstack.deploy.exception.OpenstackOperationException
-import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.OpenstackUserDataProvider
 import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.StackPoolMemberAware
 import com.netflix.spinnaker.clouddriver.openstack.domain.LoadBalancerResolver
-import com.netflix.spinnaker.clouddriver.openstack.security.OpenstackNamedAccountCredentials
 import com.netflix.spinnaker.clouddriver.openstack.task.TaskStatusAware
 import com.netflix.spinnaker.clouddriver.orchestration.AtomicOperation
 import com.netflix.spinnaker.clouddriver.orchestration.AtomicOperations
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.IOUtils
 import org.openstack4j.model.network.Subnet
-import org.springframework.beans.factory.annotation.Autowired
 
 import java.util.concurrent.ConcurrentHashMap
 
@@ -53,9 +51,6 @@ import java.util.concurrent.ConcurrentHashMap
 class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation<DeploymentResult>, StackPoolMemberAware, LoadBalancerResolver {
 
   private final String BASE_PHASE = "DEPLOY"
-
-  @Autowired
-  OpenstackUserDataProvider userDataProvider
 
   DeployOpenstackAtomicOperationDescription description
 
@@ -172,14 +167,16 @@ class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation
       String userData = getUserData(provider, stackName)
 
       task.updateStatus BASE_PHASE, "Creating heat stack $stackName..."
-      provider.deploy(description.region, stackName, template, subtemplates, description.serverGroupParameters.identity {
+      ServerGroupParameters params = description.serverGroupParameters.identity {
         it.networkId = subnet.networkId
         it.rawUserData = userData
         it.sourceUserDataType = description.userDataType
         it.sourceUserData = description.userData
         it.resourceFilename = resourceFilename
         it
-      }, description.disableRollback, description.timeoutMins, description.serverGroupParameters.loadBalancers)
+      }
+      provider.deploy(description.region, stackName, template, subtemplates, params,
+        description.disableRollback, description.timeoutMins, description.serverGroupParameters.loadBalancers)
       task.updateStatus BASE_PHASE, "Finished creating heat stack $stackName."
 
       task.updateStatus BASE_PHASE, "Successfully created server group."
@@ -206,16 +203,10 @@ class DeployOpenstackAtomicOperation implements TaskStatusAware, AtomicOperation
       } else {
         customUserData = description.userData
       }
-      task.updateStatus BASE_PHASE, "Resolved user data."
     }
 
-    OpenstackNamedAccountCredentials credentials = description.credentials.credentials
-    String commonUserData = userDataProvider.getUserData(credentials, serverGroupName, description.region)
-    String userData = [commonUserData, customUserData].join('\n')
-    if (userData && userData.startsWith("\n")) {
-      userData = userData.substring(1)
-    }
-
+    String userData = description.credentials.userDataProvider.getUserData(serverGroupName, description.region, customUserData)
+    task.updateStatus BASE_PHASE, "Resolved user data."
     userData
   }
 

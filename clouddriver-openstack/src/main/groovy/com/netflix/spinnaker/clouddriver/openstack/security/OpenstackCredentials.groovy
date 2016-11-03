@@ -24,10 +24,12 @@ public class OpenstackCredentials {
 
   final OpenstackClientProvider provider
   final OpenstackNamedAccountCredentials credentials
+  final OpenstackUserDataProvider userDataProvider
 
   OpenstackCredentials(OpenstackNamedAccountCredentials accountCredentials) {
     this.provider = OpenstackProviderFactory.createProvider(accountCredentials)
     this.credentials = accountCredentials
+    this.userDataProvider = new OpenstackUserDataProvider(this.credentials)
   }
 
 }

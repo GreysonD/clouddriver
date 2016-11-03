@@ -19,7 +19,6 @@ package com.netflix.spinnaker.clouddriver.openstack.security
 import com.netflix.spinnaker.cats.module.CatsModule
 import com.netflix.spinnaker.cats.provider.ProviderSynchronizerTypeWrapper
 import com.netflix.spinnaker.clouddriver.openstack.config.OpenstackConfigurationProperties
-import com.netflix.spinnaker.clouddriver.openstack.deploy.ops.OpenstackUserDataProvider
 import com.netflix.spinnaker.clouddriver.security.AccountCredentialsRepository
 import com.netflix.spinnaker.clouddriver.security.CredentialsInitializerSynchronizable
 import com.netflix.spinnaker.clouddriver.security.ProviderUtils
@@ -45,9 +44,6 @@ class OpenstackCredentialsInitializer implements CredentialsInitializerSynchroni
 
   @Autowired
   List<ProviderSynchronizerTypeWrapper> providerSynchronizerTypeWrappers
-
-  @Autowired
-  OpenstackUserDataProvider userDataProvider
 
   @Bean
   List<? extends OpenstackNamedAccountCredentials> openstackNamedAccountCredentials(
@@ -83,7 +79,8 @@ class OpenstackCredentialsInitializer implements CredentialsInitializerSynchroni
                                                                     managedAccount.insecure,
                                                                     managedAccount.heatTemplatePath,
                                                                     managedAccount.lbaas,
-                                                                    managedAccount.consul
+                                                                    managedAccount.consul,
+                                                                    managedAccount.userDataFile
                                                                     )
         LOG.info("Saving openstack account $openstackAccount")
         accountCredentialsRepository.save(managedAccount.name, openstackAccount)
